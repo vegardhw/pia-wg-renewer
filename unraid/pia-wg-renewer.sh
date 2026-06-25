@@ -156,9 +156,7 @@ restart_tunnel() {
   log "Restarting tunnel $tunnel..."
   wg-quick down "$tunnel" 2>/dev/null || true
   sleep 2
-  wg-quick up "$tunnel"
-
-  if [ $? -eq 0 ]; then
+  if wg-quick up "$tunnel"; then
     log "Tunnel $tunnel restarted successfully"
   else
     log "WARNING: Tunnel $tunnel failed to restart — check config manually"
@@ -202,6 +200,7 @@ fi
 if [ ! -f "$ENV_FILE" ]; then
   error_exit "Credentials file not found at $ENV_FILE"
 fi
+# shellcheck source=/dev/null
 source "$ENV_FILE"
 
 if [ -z "$PIA_USER" ] || [ -z "$PIA_PASS" ]; then
@@ -230,7 +229,7 @@ while IFS= read -r tunnel_config || [[ -n "$tunnel_config" ]]; do
   [[ "$tunnel_config" =~ ^[[:space:]]*# ]] && continue
   [[ -z "${tunnel_config//[[:space:]]/}" ]] && continue
 
-  IFS=':' read -r tunnel_name conf_path table_number region <<< "$tunnel_config"
+  IFS=':' read -r tunnel_name conf_path _table_number region <<< "$tunnel_config"
 
   log "--- Processing tunnel: $tunnel_name ($region) ---"
 

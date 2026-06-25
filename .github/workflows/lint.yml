@@ -1,0 +1,39 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'unraid/pia-wg-renewer.sh'
+      - 'container/Dockerfile'
+      - '.github/workflows/lint.yml'
+  pull_request:
+    paths:
+      - 'unraid/pia-wg-renewer.sh'
+      - 'container/Dockerfile'
+      - '.github/workflows/lint.yml'
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './unraid'
+
+  hadolint:
+    name: Hadolint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: container/Dockerfile
