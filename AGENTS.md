@@ -6,7 +6,12 @@
 managed by Unraid VPN Manager. It generates fresh `PrivateKey`, `Address`,
 `PublicKey`, and `Endpoint` values using a purpose-built Docker container that runs
 the official PIA manual-connections scripts, then patches the live wg conf files on
-Unraid and restarts the tunnels.
+Unraid. Tunnels are restarted manually by the operator via Unraid VPN Manager after
+the script completes.
+
+A companion **monitor script** (`pia-vpn-monitor.sh`) runs on a schedule and checks
+that containers routing through each VPN tunnel have working internet connectivity.
+It sends a native Unraid notification when a tunnel is down and needs renewing.
 
 ---
 
@@ -25,8 +30,10 @@ pia-wg-renewer/
 │   └── .dockerignore                      ← Excludes non-build files from the container context
 └── unraid/
     ├── pia.env.template                   ← Credentials file template
-    ├── tunnels.conf.template              ← Tunnel definitions template
-    └── pia-wg-renewer.sh                  ← Unraid User Script (main script)
+    ├── tunnels.conf.template              ← Tunnel definitions template (renewer)
+    ├── vpn-monitor.conf.template          ← Monitor config template
+    ├── pia-wg-renewer.sh                  ← Unraid User Script — credential rotation
+    └── pia-vpn-monitor.sh                 ← Unraid User Script — connectivity monitor
 ```
 
 ---
@@ -270,10 +277,6 @@ After the script completes, restart tunnels via:
 **Unraid → Settings → WireGuard → toggle each tunnel Off, then On.**
 VPN Manager handles PostUp/PostDown and routing in its own controlled context.
 
-### `verify_tunnel` — REMOVED
-
-Removed along with `restart_tunnel` — no restart means no handshake to verify.
-
 ---
 
 ## wg Conf File Format Notes
@@ -323,11 +326,76 @@ PostDown=ip -4 route add 100.64.0.0/10 via 10.0.5.10 dev br0 table 201
 ```
 Table numbers: wg1=201, wg2=202, wg3=203, etc.
 
+### `unraid/vpn-monitor.conf.template`
+Template for the monitor config file. Users copy this to:
+```
+/mnt/user/appdata/pia-wg-renewer/vpn-monitor.conf
+```
+Each non-comment line maps a WireGuard tunnel to a Docker container in the format:
+`tunnel_name:container_name`
+
+Multiple containers can be checked through the same tunnel by adding one line per container.
+
+### `unraid/pia-vpn-monitor.sh`
+The monitor Unraid User Script. For each entry in `vpn-monitor.conf` it:
+1. Verifies the WireGuard interface is active (`wg show`)
+2. Checks that the container is running — skips (no notification) if the container itself is stopped
+3. Runs a `curl` connectivity test from inside the container
+4. Sends a native Unraid notification on any failure
+
+Recommended schedule: **Every 15 minutes** (`*/15 * * * *`)
+Log: `/mnt/user/appdata/pia-wg-renewer/logs/monitor-last-run.log`
+
+See `pia-vpn-monitor.sh` implementation details below.
+
 ---
 
-## Deployment Steps (Full)
+## `pia-vpn-monitor.sh` Implementation Details
 
-### Step 1 — Publish the container image
+### CONFIG variables
+| Variable | Default | Purpose |
+|---|---|---|
+| `MONITOR_FILE` | `/mnt/user/appdata/pia-wg-renewer/vpn-monitor.conf` | Monitor config file |
+| `CHECK_URL` | `https://ipinfo.io/ip` | URL curled from inside each container to verify connectivity |
+| `CHECK_TIMEOUT` | `10` | `curl` max time in seconds |
+| `LOG_DIR` | `/mnt/user/appdata/pia-wg-renewer/logs` | Shared log directory |
+| `LOG_FILE` | `${LOG_DIR}/monitor-last-run.log` | Overwritten on every run |
+
+### `vpn-monitor.conf` format
+```
+# tunnel_name:container_name
+wg1:sabnzbd
+wg1:qbittorrent
+wg2:prowlarr
+```
+Blank lines and lines beginning with `#` are skipped.
+Multiple containers can share a tunnel — each gets its own check and its own
+notification if it fails.
+
+### `check_entry(tunnel_name, container_name)`
+Runs the following checks in order, short-circuiting on the first failure:
+
+1. **Interface check** — `wg show <tunnel>`: if the WireGuard interface is not
+   active, sends a notification and returns failure immediately.
+2. **Container running check** — `docker inspect` state: if the container is not
+   running, logs a skip and returns success (stopped containers are not a VPN problem).
+3. **Connectivity check** — `docker exec <container> curl --max-time <timeout> -s <url>`:
+   if curl returns no output or exits non-zero, sends a notification.
+
+### `send_notification(tunnel, container, reason)`
+Calls the Unraid native notification script:
+```bash
+/usr/local/emhttp/webGui/scripts/notify \
+  -e "PIA VPN Monitor" \
+  -s "VPN tunnel <tunnel> is down" \
+  -d "Container '<container>' lost VPN connectivity (<reason>). Run pia-wg-renewer, then restart the tunnel via Unraid VPN Manager." \
+  -i "alert"
+```
+Notifications appear in the Unraid bell menu and Notifications page.
+
+---
+
+ — Publish the container image
 
 The image is built and published automatically by GitHub Actions when `container/Dockerfile`
 changes on `main`, or can be triggered manually via `workflow_dispatch`.
@@ -380,7 +448,18 @@ nano /mnt/user/appdata/pia-wg-renewer/tunnels.conf
    no changes to the script are needed
 5. Set schedule to **Monthly** or leave as **On Demand**
 
-### Step 5 — Verify PostUp/PostDown rules
+### Step 5 — Install the monitor User Script
+
+```bash
+cp unraid/vpn-monitor.conf.template /mnt/user/appdata/pia-wg-renewer/vpn-monitor.conf
+nano /mnt/user/appdata/pia-wg-renewer/vpn-monitor.conf
+```
+
+1. Unraid → Settings → User Scripts → Add New Script → name it `pia-vpn-monitor`
+2. Paste the contents of `unraid/pia-vpn-monitor.sh`
+3. Set schedule to **Every 15 minutes** (`*/15 * * * *`)
+
+### Step 6 — Verify PostUp/PostDown rules
 
 After first run, inspect each conf file and verify route order as described above.
 
@@ -398,11 +477,13 @@ After first run, inspect each conf file and verify route order as described abov
 - Test manually: `docker start pia-wg-renewer && docker exec -it pia-wg-renewer bash`
 - Run PIA script manually inside container to see full output
 
-**Tunnel fails to restart after rotation:**
+**Tunnel fails to come up after credential rotation:**
+- Credentials are patched by the script but tunnels must be restarted manually:
+  Unraid → Settings → WireGuard → toggle Off, then On
 - Check conf: `cat /boot/config/wireguard/wg1.conf`
 - Verify all four values were updated (Address, PrivateKey, PublicKey, Endpoint)
 - Check PostUp/PostDown route order (flush must come before custom routes)
-- Check handshake: `wg show wg1`
+- Check handshake after restart: `wg show wg1`
 
 **VPN Manager re-tattoos and breaks route order:**
 - Always edit conf directly via `nano`, never re-import via VPN Manager UI
