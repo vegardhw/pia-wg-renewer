@@ -101,6 +101,10 @@ parse_value() {
 # Patch the Unraid wg conf file (format: "Key=Value") with all four new values.
 # Always backs up the existing conf to conf.bak before making changes.
 # In dry-run mode: prints current and new values side by side, no files are touched.
+# NOTE: This is the only host-level operation this script performs. Tunnels are
+# intentionally NOT restarted here — do that via Unraid VPN Manager (toggle off/on)
+# after the script completes. wg-quick on the Unraid host applies PostUp/PostDown rules
+# and routing changes that can make the host unreachable if run from a User Script.
 update_conf() {
   local conf_path=$1
   local new_address=$2
@@ -145,44 +149,6 @@ update_conf() {
   log "  Endpoint=${new_endpoint}"
 }
 
-restart_tunnel() {
-  local tunnel=$1
-
-  if [ "${DRY_RUN}" = true ]; then
-    log "[DRY RUN] Would restart tunnel: $tunnel"
-    return 0
-  fi
-
-  log "Restarting tunnel $tunnel..."
-  wg-quick down "$tunnel" 2>/dev/null || true
-  sleep 2
-  if wg-quick up "$tunnel"; then
-    log "Tunnel $tunnel restarted successfully"
-  else
-    log "WARNING: Tunnel $tunnel failed to restart — check config manually"
-  fi
-}
-
-verify_tunnel() {
-  local tunnel=$1
-
-  if [ "${DRY_RUN}" = true ]; then
-    log "[DRY RUN] Would verify tunnel: $tunnel"
-    return 0
-  fi
-
-  sleep 5
-  local handshake
-  handshake=$(wg show "$tunnel" latest-handshakes 2>/dev/null | awk '{print $2}')
-
-  if [ -n "$handshake" ] && [ "$handshake" != "0" ]; then
-    log "Tunnel $tunnel verified — handshake received"
-    return 0
-  else
-    log "WARNING: Tunnel $tunnel — no handshake received yet (may still be connecting)"
-    return 1
-  fi
-}
 
 # ============================================================
 # MAIN
@@ -251,10 +217,6 @@ while IFS= read -r tunnel_config || [[ -n "$tunnel_config" ]]; do
 
   update_conf "$conf_path" "$NEW_ADDRESS" "$NEW_PRIVKEY" "$NEW_PUBKEY" "$NEW_ENDPOINT"
 
-  restart_tunnel "$tunnel_name"
-
-  verify_tunnel "$tunnel_name"
-
   log "--- Done with $tunnel_name ---"
   sleep 2
 done < "$TUNNELS_FILE"
@@ -263,4 +225,9 @@ done < "$TUNNELS_FILE"
 log "Stopping $CONTAINER_NAME container..."
 docker stop "$CONTAINER_NAME"
 
+log ""
+log "All conf files updated. To apply new credentials:"
+log "  Unraid → Settings → WireGuard → toggle each tunnel Off, then On."
+log "  (Do NOT use wg-quick directly — VPN Manager controls routing for these tunnels.)"
+log ""
 log "=== PIA WG Renewer Complete ==="
