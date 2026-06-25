@@ -130,6 +130,7 @@ reads and writes them. Do not move them.
 | `TUNNELS_FILE` | `/mnt/user/appdata/pia-wg-renewer/tunnels.conf` | Tunnel definitions file |
 | `LOG_DIR` | `/mnt/user/appdata/pia-wg-renewer/logs` | Directory for log files |
 | `LOG_FILE` | `${LOG_DIR}/last-run.log` | Overwritten on every run |
+| `DRY_RUN` | `false` | Set to `true` to generate and display credentials without writing any changes |
 
 ### Logging setup
 Immediately after `mkdir -p "$LOG_DIR"`, the script redirects all output:
@@ -174,6 +175,42 @@ docker exec pia-wg-renewer bash -c \
   "curl -s 'https://serverlist.piaservers.net/vpninfo/servers/v6' \
   | head -1 | jq -r '.regions[].id' | sort"
 docker stop pia-wg-renewer
+```
+
+### Dry-run mode
+
+Set `DRY_RUN=true` in the CONFIG section to run the full credential generation
+pipeline without making any changes on the Unraid host.
+
+What dry-run **does**:
+- Starts the container and calls `run_setup.sh` for each tunnel — generates **real** PIA credentials
+- Parses all four values (Address, PrivateKey, PublicKey, Endpoint)
+- Logs current values from each wg conf alongside the new values PIA returned
+
+What dry-run **skips**:
+- No `.bak` backup is created
+- No `sed` writes to any wg conf file
+- No `wg-quick down/up` tunnel restarts
+- No handshake verification
+
+All dry-run log lines are prefixed with `[DRY RUN]` for easy filtering.
+The full output is still written to `last-run.log`.
+
+Example dry-run output for one tunnel:
+```
+[DRY RUN] Would update: /boot/config/wireguard/wg1.conf
+[DRY RUN] Current values in conf:
+[DRY RUN]   Address=10.42.1.5/32
+[DRY RUN]   PrivateKey=<redacted>
+[DRY RUN]   PublicKey=oldServerPublicKeyBase64==
+[DRY RUN]   Endpoint=1.2.3.4:1337
+[DRY RUN] New values from PIA:
+[DRY RUN]   Address=10.42.8.12/32
+[DRY RUN]   PrivateKey=<redacted>
+[DRY RUN]   PublicKey=newServerPublicKeyBase64==
+[DRY RUN]   Endpoint=5.6.7.8:1337
+[DRY RUN] Would restart tunnel: wg1
+[DRY RUN] Would verify tunnel: wg1
 ```
 
 ### `generate_pia_config(region)`

@@ -18,6 +18,11 @@ TUNNELS_FILE="/mnt/user/appdata/pia-wg-renewer/tunnels.conf"
 LOG_DIR="/mnt/user/appdata/pia-wg-renewer/logs"
 LOG_FILE="${LOG_DIR}/last-run.log"
 
+# Dry-run mode — set to true to generate and display new credentials without
+# writing any changes to conf files or restarting tunnels. Useful for verifying
+# that PIA credential generation is working and previewing what would change.
+DRY_RUN=false
+
 # ============================================================
 # LOGGING SETUP
 # All output (stdout + stderr) is tee'd to last-run.log AND printed to
@@ -95,6 +100,7 @@ parse_value() {
 
 # Patch the Unraid wg conf file (format: "Key=Value") with all four new values.
 # Always backs up the existing conf to conf.bak before making changes.
+# In dry-run mode: prints current and new values side by side, no files are touched.
 update_conf() {
   local conf_path=$1
   local new_address=$2
@@ -104,6 +110,21 @@ update_conf() {
 
   if [ ! -f "$conf_path" ]; then
     error_exit "Config file not found: $conf_path"
+  fi
+
+  if [ "${DRY_RUN}" = true ]; then
+    log "[DRY RUN] Would update: $conf_path"
+    log "[DRY RUN] Current values in conf:"
+    log "[DRY RUN]   Address=$(grep '^Address=' "$conf_path" | cut -d'=' -f2)"
+    log "[DRY RUN]   PrivateKey=<redacted>"
+    log "[DRY RUN]   PublicKey=$(grep '^PublicKey=' "$conf_path" | cut -d'=' -f2)"
+    log "[DRY RUN]   Endpoint=$(grep '^Endpoint=' "$conf_path" | cut -d'=' -f2)"
+    log "[DRY RUN] New values from PIA:"
+    log "[DRY RUN]   Address=${new_address}"
+    log "[DRY RUN]   PrivateKey=<redacted>"
+    log "[DRY RUN]   PublicKey=${new_pubkey}"
+    log "[DRY RUN]   Endpoint=${new_endpoint}"
+    return 0
   fi
 
   cp "$conf_path" "${conf_path}.bak"
@@ -127,6 +148,11 @@ update_conf() {
 restart_tunnel() {
   local tunnel=$1
 
+  if [ "${DRY_RUN}" = true ]; then
+    log "[DRY RUN] Would restart tunnel: $tunnel"
+    return 0
+  fi
+
   log "Restarting tunnel $tunnel..."
   wg-quick down "$tunnel" 2>/dev/null || true
   sleep 2
@@ -141,6 +167,11 @@ restart_tunnel() {
 
 verify_tunnel() {
   local tunnel=$1
+
+  if [ "${DRY_RUN}" = true ]; then
+    log "[DRY RUN] Would verify tunnel: $tunnel"
+    return 0
+  fi
 
   sleep 5
   local handshake
@@ -161,6 +192,11 @@ verify_tunnel() {
 
 log "=== PIA WG Renewer Started ==="
 log "Log: $LOG_FILE"
+
+if [ "${DRY_RUN}" = true ]; then
+  log "*** DRY RUN MODE — PIA credentials will be generated and displayed"
+  log "*** but no conf files will be modified and no tunnels will be restarted."
+fi
 
 # Load credentials
 if [ ! -f "$ENV_FILE" ]; then
