@@ -14,17 +14,9 @@
 
 CONTAINER_NAME="pia-wg-renewer"
 ENV_FILE="/mnt/user/appdata/pia-wg-renewer/pia.env"
+TUNNELS_FILE="/mnt/user/appdata/pia-wg-renewer/tunnels.conf"
 LOG_DIR="/mnt/user/appdata/pia-wg-renewer/logs"
 LOG_FILE="${LOG_DIR}/last-run.log"
-
-# WireGuard tunnels to rotate
-# Format: "tunnel_name:wg_conf_path:routing_table_number:pia_region"
-# Note: routing_table_number is for your reference only — it is not used by
-# this script directly. It matches the table number in the wg conf PostUp/PostDown rules.
-TUNNELS=(
-  "wg1:/boot/config/wireguard/wg1.conf:201:swiss"
-  "wg2:/boot/config/wireguard/wg2.conf:202:norway"
-)
 
 # ============================================================
 # LOGGING SETUP
@@ -180,13 +172,28 @@ if [ -z "$PIA_USER" ] || [ -z "$PIA_PASS" ]; then
   error_exit "PIA_USER or PIA_PASS not set in $ENV_FILE"
 fi
 
+# Validate tunnels config
+if [ ! -f "$TUNNELS_FILE" ]; then
+  error_exit "Tunnels config not found at $TUNNELS_FILE"
+fi
+
+tunnel_count=$(grep -cE '^[^[:space:]#]' "$TUNNELS_FILE" 2>/dev/null || echo 0)
+if [ "$tunnel_count" -eq 0 ]; then
+  error_exit "No active tunnel definitions found in $TUNNELS_FILE"
+fi
+log "Found $tunnel_count tunnel(s) to process"
+
 # Start container
 log "Starting $CONTAINER_NAME container..."
 docker start "$CONTAINER_NAME" || error_exit "Failed to start container $CONTAINER_NAME"
 sleep 3
 
-# Process each tunnel
-for tunnel_config in "${TUNNELS[@]}"; do
+# Process each tunnel defined in tunnels.conf
+# Skips blank lines and lines starting with #
+while IFS= read -r tunnel_config || [[ -n "$tunnel_config" ]]; do
+  [[ "$tunnel_config" =~ ^[[:space:]]*# ]] && continue
+  [[ -z "${tunnel_config//[[:space:]]/}" ]] && continue
+
   IFS=':' read -r tunnel_name conf_path table_number region <<< "$tunnel_config"
 
   log "--- Processing tunnel: $tunnel_name ($region) ---"
@@ -215,7 +222,7 @@ for tunnel_config in "${TUNNELS[@]}"; do
 
   log "--- Done with $tunnel_name ---"
   sleep 2
-done
+done < "$TUNNELS_FILE"
 
 # Stop container
 log "Stopping $CONTAINER_NAME container..."

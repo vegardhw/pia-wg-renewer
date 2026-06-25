@@ -40,6 +40,7 @@ pia-wg-renewer/
 │   └── .dockerignore
 └── unraid/
     ├── pia.env.template            # Credentials file template
+    ├── tunnels.conf.template       # Tunnel definitions template
     └── pia-wg-renewer.sh           # Unraid User Script
 ```
 
@@ -76,14 +77,29 @@ docker stop pia-wg-renewer
 > The container is stopped immediately after creation — it is only started
 > when the User Script runs.
 
-### 2 — Set up credentials
+### 2 — Set up credentials and tunnel definitions
 
 ```bash
 mkdir -p /mnt/user/appdata/pia-wg-renewer
+
+# Credentials
 cp unraid/pia.env.template /mnt/user/appdata/pia-wg-renewer/pia.env
 chmod 600 /mnt/user/appdata/pia-wg-renewer/pia.env
 nano /mnt/user/appdata/pia-wg-renewer/pia.env
+
+# Tunnel definitions
+cp unraid/tunnels.conf.template /mnt/user/appdata/pia-wg-renewer/tunnels.conf
+nano /mnt/user/appdata/pia-wg-renewer/tunnels.conf
 ```
+
+Each line in `tunnels.conf` defines one WireGuard tunnel to rotate:
+```
+tunnel_name:wg_conf_path:routing_table_number:pia_region
+```
+Add as many lines as you have tunnels. Comment out any tunnel with `#` to skip it
+without removing the definition. See `tunnels.conf.template` for the full format
+description, list of common PIA region IDs, and how to query PIA for the
+complete current region list.
 
 > **Why `/mnt/user/appdata/` and not `/boot/config/`?**
 > The `/boot` filesystem is FAT32 — it does not support Unix file permissions,
@@ -96,17 +112,8 @@ nano /mnt/user/appdata/pia-wg-renewer/pia.env
 
 1. Unraid → Settings → User Scripts → **Add New Script** → name it `pia-wg-renewer`
 2. Paste the contents of `unraid/pia-wg-renewer.sh`
-3. Adjust the `TUNNELS` array at the top to match your setup:
-
-```bash
-TUNNELS=(
-  "wg1:/boot/config/wireguard/wg1.conf:201:swiss"
-  "wg2:/boot/config/wireguard/wg2.conf:202:norway"
-)
-```
-
-Format: `"tunnel_name:conf_path:routing_table_number:pia_region"`
-
+3. The script reads all tunnel definitions from `tunnels.conf` automatically —
+   no edits to the script are needed
 4. Set schedule to **Monthly** or leave as **On Demand**
 
 ### 4 — Verify PostUp/PostDown rules

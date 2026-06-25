@@ -1,0 +1,53 @@
+# PIA WG Renewer — Tunnel Definitions
+# Copy to: /mnt/user/appdata/pia-wg-renewer/tunnels.conf
+#
+# One tunnel definition per line. Blank lines and lines starting with # are ignored.
+#
+# Format:
+#   tunnel_name:wg_conf_path:routing_table_number:pia_region
+#
+#   tunnel_name          WireGuard interface name as shown in Unraid VPN Manager (e.g. wg1)
+#   wg_conf_path         Full path to the conf file managed by Unraid VPN Manager
+#   routing_table_number Routing table number used in this tunnel's PostUp/PostDown rules.
+#                        For reference only — not used by the script itself.
+#                        Unraid convention: wg1=201, wg2=202, wg3=203, etc.
+#   pia_region           PIA region ID. See "Finding region IDs" below.
+#
+# ---------------------------------------------------------------
+# Finding valid PIA region IDs
+# ---------------------------------------------------------------
+# Run the following on your Unraid terminal to list all available regions:
+#
+#   docker start pia-wg-renewer
+#   docker exec pia-wg-renewer bash -c \
+#     "curl -s 'https://serverlist.piaservers.net/vpninfo/servers/v6' \
+#     | head -1 | jq -r '.regions[].id' | sort"
+#   docker stop pia-wg-renewer
+#
+# Common region IDs (not exhaustive):
+#   swiss            Switzerland
+#   norway           Norway
+#   france           France
+#   germany          Germany
+#   netherlands      Netherlands
+#   sweden           Sweden
+#   uk_london        UK London
+#   uk_manchester    UK Manchester
+#   us_new_york_city US New York City
+#   us_silicon_valley US Silicon Valley
+#   us_chicago       US Chicago
+#   us_seattle       US Seattle
+#   canada_toronto   Canada Toronto
+#   australia_melbourne Australia Melbourne
+#   japan            Japan
+#   singapore        Singapore
+#
+# ---------------------------------------------------------------
+# Examples — uncomment and adjust the lines you need
+# ---------------------------------------------------------------
+
+wg1:/boot/config/wireguard/wg1.conf:201:swiss
+wg2:/boot/config/wireguard/wg2.conf:202:norway
+# wg3:/boot/config/wireguard/wg3.conf:203:france
+# wg4:/boot/config/wireguard/wg4.conf:204:germany
+# wg5:/boot/config/wireguard/wg5.conf:205:netherlands

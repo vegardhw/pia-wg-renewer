@@ -25,6 +25,7 @@ pia-wg-renewer/
 │   └── .dockerignore                      ← Excludes non-build files from the container context
 └── unraid/
     ├── pia.env.template                   ← Credentials file template
+    ├── tunnels.conf.template              ← Tunnel definitions template
     └── pia-wg-renewer.sh                  ← Unraid User Script (main script)
 ```
 
@@ -68,6 +69,17 @@ Builds a Debian bookworm-slim image with:
 - `wireguard-tools`, `curl`, `jq`, `git`, `bash`, `openssh-client`, `iproute2`
 - The official PIA manual-connections repo cloned to `/opt/pia-manual-connections`
 - Default CMD: `sleep infinity`
+
+### `unraid/tunnels.conf.template`
+Template for the tunnel definitions file. Users copy this to:
+```
+/mnt/user/appdata/pia-wg-renewer/tunnels.conf
+```
+Each non-comment line defines one tunnel in the format:
+`tunnel_name:wg_conf_path:routing_table_number:pia_region`
+
+The template includes format documentation, a list of common PIA region IDs, and
+a command to query PIA's server list API for the full current list of region IDs.
 
 ### `unraid/pia.env.template`
 Template for the credentials file. Users copy this to:
@@ -115,9 +127,9 @@ reads and writes them. Do not move them.
 |---|---|---|
 | `CONTAINER_NAME` | `pia-wg-renewer` | Docker container to exec into |
 | `ENV_FILE` | `/mnt/user/appdata/pia-wg-renewer/pia.env` | Credentials file |
+| `TUNNELS_FILE` | `/mnt/user/appdata/pia-wg-renewer/tunnels.conf` | Tunnel definitions file |
 | `LOG_DIR` | `/mnt/user/appdata/pia-wg-renewer/logs` | Directory for log files |
 | `LOG_FILE` | `${LOG_DIR}/last-run.log` | Overwritten on every run |
-| `TUNNELS` | *(example values)* | Array of tunnel configs to rotate |
 
 ### Logging setup
 Immediately after `mkdir -p "$LOG_DIR"`, the script redirects all output:
@@ -129,18 +141,40 @@ to both the Unraid User Scripts UI (stdout) and `last-run.log` simultaneously.
 `last-run.log` is overwritten on each run so it always reflects the most recent
 execution. No log rotation is needed.
 
-### TUNNELS array format
-```bash
-TUNNELS=(
-  "wg1:/boot/config/wireguard/wg1.conf:201:swiss"
-  "wg2:/boot/config/wireguard/wg2.conf:202:norway"
-)
-```
-Format: `"tunnel_name:wg_conf_path:routing_table_number:pia_region"`
+### TUNNELS_FILE and tunnel definitions
+Tunnel definitions are read from `TUNNELS_FILE` at runtime — they are **not** inside
+the script. This means regions and tunnel counts can be changed by editing one config
+file without ever modifying or re-pasting the User Script.
 
-`routing_table_number` is **documentation-only** — it is not used by the script.
-It is included in the config so the operator can cross-reference the table numbers
+Format of each line in `tunnels.conf`:
+```
+tunnel_name:wg_conf_path:routing_table_number:pia_region
+```
+Blank lines and lines beginning with `#` are skipped. Any number of tunnels is
+supported — add one line per tunnel.
+
+```
+# tunnels.conf example
+wg1:/boot/config/wireguard/wg1.conf:201:swiss
+wg2:/boot/config/wireguard/wg2.conf:202:norway
+wg3:/boot/config/wireguard/wg3.conf:203:france
+```
+
+`routing_table_number` is **documentation-only** — the script does not use it.
+It is kept in the config so the operator can cross-reference the table numbers
 used in the wg conf PostUp/PostDown rules without looking them up separately.
+
+The script validates that `TUNNELS_FILE` exists and contains at least one active
+(non-comment) line before starting the container.
+
+**Querying PIA for valid region IDs:**
+```bash
+docker start pia-wg-renewer
+docker exec pia-wg-renewer bash -c \
+  "curl -s 'https://serverlist.piaservers.net/vpninfo/servers/v6' \
+  | head -1 | jq -r '.regions[].id' | sort"
+docker stop pia-wg-renewer
+```
 
 ### `generate_pia_config(region)`
 Wrapped in `timeout 120` to prevent hanging if PIA servers are unreachable.
@@ -281,13 +315,19 @@ Then immediately stop it:
 docker stop pia-wg-renewer
 ```
 
-### Step 3 — Set up credentials file on Unraid
+### Step 3 — Set up credentials and tunnel definitions on Unraid
 
 ```bash
 mkdir -p /mnt/user/appdata/pia-wg-renewer
+
+# Credentials
 cp unraid/pia.env.template /mnt/user/appdata/pia-wg-renewer/pia.env
 chmod 600 /mnt/user/appdata/pia-wg-renewer/pia.env
 nano /mnt/user/appdata/pia-wg-renewer/pia.env
+
+# Tunnel definitions
+cp unraid/tunnels.conf.template /mnt/user/appdata/pia-wg-renewer/tunnels.conf
+nano /mnt/user/appdata/pia-wg-renewer/tunnels.conf
 ```
 
 ### Step 4 — Install the User Script
@@ -295,7 +335,8 @@ nano /mnt/user/appdata/pia-wg-renewer/pia.env
 1. Install the **User Scripts** plugin from Community Applications
 2. Unraid → Settings → User Scripts → Add New Script → name it `pia-wg-renewer`
 3. Paste the contents of `unraid/pia-wg-renewer.sh`
-4. Adjust the `TUNNELS` array and `ENV_FILE` path at the top
+4. The script reads tunnel definitions from `tunnels.conf` automatically —
+   no changes to the script are needed
 5. Set schedule to **Monthly** or leave as **On Demand**
 
 ### Step 5 — Verify PostUp/PostDown rules
