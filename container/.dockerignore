@@ -1,0 +1,7 @@
+# Build context is container/ — exclude anything that doesn't belong in the image.
+.git
+*.md
+*.log
+*.env
+.gitignore
+.dockerignore
