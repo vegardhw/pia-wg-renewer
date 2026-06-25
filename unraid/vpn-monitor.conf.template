@@ -1,0 +1,21 @@
+# PIA VPN Monitor — container connectivity config
+#
+# Format: tunnel_name:container_name
+#
+# One entry per container that routes through a PIA WireGuard tunnel.
+# The monitor script will:
+#   1. Verify the WireGuard interface (e.g. wg1) is active on the host
+#   2. Check that the container is running — skips silently if it is stopped
+#   3. Run a curl connectivity test from inside the container
+#   4. Send a native Unraid notification (bell icon) if either check fails
+#
+# Multiple containers can share a tunnel — add one line per container.
+# Blank lines and lines beginning with # are ignored.
+#
+# tunnel_name    — WireGuard interface name as shown in Unraid VPN Manager (wg1, wg2, ...)
+# container_name — Docker container name exactly as shown in the Unraid Docker tab
+#
+# Examples:
+#wg1:sabnzbd
+#wg1:qbittorrent
+#wg2:prowlarr

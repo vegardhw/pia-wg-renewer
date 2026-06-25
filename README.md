@@ -5,8 +5,12 @@ Automated rotation of PIA WireGuard credentials for tunnels managed by **Unraid 
 Generates fresh `PrivateKey`, `Address`, `PublicKey`, and `Endpoint` values via a
 purpose-built Docker container running the official
 [PIA manual-connections](https://github.com/pia-foss/manual-connections) scripts,
-then patches the live WireGuard conf files on Unraid and restarts the tunnels — all
-from a single Unraid User Script.
+then patches the live WireGuard conf files on Unraid — ready for the operator to
+restart each tunnel via Unraid VPN Manager.
+
+A companion **monitor script** periodically checks that containers routing through
+each VPN tunnel still have working internet connectivity, and sends a native Unraid
+notification when a tunnel needs to be renewed.
 
 The container image is built automatically from this repository and published to
 GitHub Container Registry. No separate build step is required.
@@ -16,13 +20,19 @@ GitHub Container Registry. No separate build step is required.
 ## How It Works
 
 ```
-Unraid User Script (scheduled monthly or on-demand)
+pia-wg-renewer  (monthly / on-demand)
   → Start pia-wg-renewer container
   → docker exec: run PIA manual-connections inside container
   → Parse new PrivateKey, Address, PublicKey, Endpoint
   → Patch wg1.conf (and optionally wg2.conf …) on the Unraid host
-  → wg-quick down/up to restart each tunnel
   → Stop container
+  → Operator restarts each tunnel via Unraid VPN Manager (toggle off → on)
+
+pia-vpn-monitor  (every 15 minutes)
+  → For each configured tunnel + container pair:
+      Check WireGuard interface is active
+      docker exec: curl connectivity test inside the container
+  → On failure: send native Unraid notification
 ```
 
 The `pia-wg-renewer` container sleeps between runs and is never left active.
@@ -40,8 +50,10 @@ pia-wg-renewer/
 │   └── .dockerignore
 └── unraid/
     ├── pia.env.template            # Credentials file template
-    ├── tunnels.conf.template       # Tunnel definitions template
-    └── pia-wg-renewer.sh           # Unraid User Script
+    ├── tunnels.conf.template       # Tunnel definitions template (renewer)
+    ├── vpn-monitor.conf.template   # Monitor config template
+    ├── pia-wg-renewer.sh           # User Script — credential rotation
+    └── pia-vpn-monitor.sh          # User Script — connectivity monitor
 ```
 
 ---
@@ -108,7 +120,7 @@ complete current region list.
 > with backup tools. The WireGuard conf files themselves remain at
 > `/boot/config/wireguard/` where Unraid VPN Manager expects them.
 
-### 3 — Install the User Script
+### 3 — Install the renewer User Script
 
 1. Unraid → Settings → User Scripts → **Add New Script** → name it `pia-wg-renewer`
 2. Paste the contents of `unraid/pia-wg-renewer.sh`
@@ -116,7 +128,32 @@ complete current region list.
    no edits to the script are needed
 4. Set schedule to **Monthly** or leave as **On Demand**
 
-### 4 — Verify PostUp/PostDown rules
+After each run, restart tunnels via **Unraid → Settings → WireGuard → toggle each
+tunnel Off, then On**. The script patches only the conf files — it does not touch
+the host network.
+
+### 4 — Install the monitor User Script
+
+```bash
+cp unraid/vpn-monitor.conf.template /mnt/user/appdata/pia-wg-renewer/vpn-monitor.conf
+nano /mnt/user/appdata/pia-wg-renewer/vpn-monitor.conf
+```
+
+Each line maps a WireGuard tunnel to a container whose connectivity should be checked:
+```
+tunnel_name:container_name
+```
+
+Then in User Scripts:
+1. Unraid → Settings → User Scripts → **Add New Script** → name it `pia-vpn-monitor`
+2. Paste the contents of `unraid/pia-vpn-monitor.sh`
+3. Set schedule to **Every 15 minutes** (`*/15 * * * *`)
+
+The monitor checks that the WireGuard interface is active and that a `curl` from
+inside each container reaches the internet. On failure it sends a native Unraid
+notification (bell icon + Notifications page) prompting you to run the renewer.
+
+### 5 — Verify PostUp/PostDown rules
 
 After the first run, inspect each conf file and verify the PostUp/PostDown route
 order. See [AGENTS.md](./AGENTS.md) for the required rule ordering.
@@ -134,7 +171,8 @@ bash /tmp/user.scripts/tmpScripts/pia-wg-renewer/script
 
 Last run output is always available at:
 ```bash
-cat /mnt/user/appdata/pia-wg-renewer/logs/last-run.log
+cat /mnt/user/appdata/pia-wg-renewer/logs/last-run.log          # renewer
+cat /mnt/user/appdata/pia-wg-renewer/logs/monitor-last-run.log  # monitor
 ```
 
 ---
