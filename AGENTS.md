@@ -39,8 +39,8 @@ Unraid User Script (cron / on-demand)
   → docker exec: run PIA manual-connections script inside container
   → Parse PrivateKey + Address (from [Interface]) and PublicKey + Endpoint (from [Peer])
   → sed -i patch wg1.conf (and optionally wg2.conf, wgN.conf) on Unraid host
-  → wg-quick down/up to restart each tunnel
   → Stop container
+  → Operator restarts each tunnel via Unraid VPN Manager (toggle off → on)
 ```
 
 The container image (`ghcr.io/<owner>/pia-wg-renewer:latest`) is built automatically
@@ -190,8 +190,6 @@ What dry-run **does**:
 What dry-run **skips**:
 - No `.bak` backup is created
 - No `sed` writes to any wg conf file
-- No `wg-quick down/up` tunnel restarts
-- No handshake verification
 
 All dry-run log lines are prefixed with `[DRY RUN]` for easy filtering.
 The full output is still written to `last-run.log`.
@@ -209,8 +207,6 @@ Example dry-run output for one tunnel:
 [DRY RUN]   PrivateKey=<redacted>
 [DRY RUN]   PublicKey=newServerPublicKeyBase64==
 [DRY RUN]   Endpoint=5.6.7.8:1337
-[DRY RUN] Would restart tunnel: wg1
-[DRY RUN] Would verify tunnel: wg1
 ```
 
 ### `generate_pia_config(region)`
@@ -263,12 +259,20 @@ sed -i "s|^Endpoint=.*|Endpoint=${new_endpoint}|"   "$conf_path"
 `PublicKey=` and `Endpoint=` only appear in the `[Peer]` section so the patterns
 are unambiguous. Always backs up to `${conf_path}.bak` before editing.
 
-### `restart_tunnel(tunnel_name)`
-Runs `wg-quick down <tunnel>` then `wg-quick up <tunnel>` on the Unraid host.
+### `restart_tunnel` and `verify_tunnel` — REMOVED
 
-### `verify_tunnel(tunnel_name)`
-Waits 5 seconds then checks `wg show <tunnel> latest-handshakes`. A non-zero
-timestamp indicates a successful handshake.
+These functions were removed. Running `wg-quick down/up` on the Unraid host from a
+User Script is unsafe: it executes PostUp/PostDown hooks and routing changes
+(including default route injection via `AllowedIPs = 0.0.0.0/0`) that can make the
+host unreachable if the new tunnel doesn't establish immediately.
+
+After the script completes, restart tunnels via:
+**Unraid → Settings → WireGuard → toggle each tunnel Off, then On.**
+VPN Manager handles PostUp/PostDown and routing in its own controlled context.
+
+### `verify_tunnel` — REMOVED
+
+Removed along with `restart_tunnel` — no restart means no handshake to verify.
 
 ---
 
